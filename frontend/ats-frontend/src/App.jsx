@@ -76,7 +76,7 @@ function App() {
     formData.append('vaga', vaga)
 
     try {
-      const response = await fetch('http://localhost:8080/api/curriculo/analisar', {
+      const response = await fetch('https://ats-backend-api-o8h8.onrender.com/curriculo/analisar', {
         method: 'POST',
         body: formData,
       })
