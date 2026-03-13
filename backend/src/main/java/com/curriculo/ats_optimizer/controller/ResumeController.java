@@ -3,23 +3,28 @@ package com.curriculo.ats_optimizer.controller;
 import com.curriculo.ats_optimizer.service.AiService;
 import com.curriculo.ats_optimizer.service.PdfGeneratorService;
 import com.curriculo.ats_optimizer.service.PdfParserService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/curriculo")
 @CrossOrigin(origins = "*")
 @Tag(name = "Otimizador de Currículo ATS", description = "Endpoint para analisar e otimizar currículos em PDF com IA")
-public class ResumeController{
+public class ResumeController {
 
     private final PdfParserService pdfParserService;
     private final AiService aiService;
@@ -32,10 +37,9 @@ public class ResumeController{
     }
 
     @PostMapping(value = "/analisar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Otimizar Currículo", description = "Recebe um PDF original e a descrição da vaga, e devolve um novo PDF otimizado.")
+    @Operation(summary = "Otimizar Currículo", description = "Recebe um PDF original e a descrição da vaga, e devolve os dados de compatibilidade e o PDF otimizado em Base64.")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "PDF otimizado gerado com sucesso",
-                    content = @Content(mediaType = "application/pdf")),
+            @ApiResponse(responseCode = "200", description = "Análise concluída e PDF gerado", content = @Content(mediaType = "application/json")),
             @ApiResponse(responseCode = "400", description = "Ficheiro inválido ou não enviado"),
             @ApiResponse(responseCode = "500", description = "Erro interno no servidor ou na IA")
     })
@@ -60,19 +64,26 @@ public class ResumeController{
             System.out.println("3. A gerar o novo PDF otimizado...");
             byte[] novoPdf = pdfGeneratorService.gerarPdfOtimizado(jsonDaIA);
 
-            System.out.println("4. Sucesso! A enviar ficheiro para o utilizador.");
+            System.out.println("4. A empacotar dados para o Frontend...");
+            String base64Pdf = Base64.getEncoder().encodeToString(novoPdf);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_PDF);
-            headers.setContentDispositionFormData("attachment", "Curriculo_Otimizado.pdf");
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode aiResult = mapper.readTree(jsonDaIA);
 
-            return ResponseEntity.ok()
-                    .headers(headers)
-                    .body(novoPdf);
+            Map<String, Object> responseData = new HashMap<>();
+
+            int score = aiResult.has("compatibility_score") ? aiResult.get("compatibility_score").asInt() : 0;
+
+            responseData.put("score", score);
+            responseData.put("matching_keywords", aiResult.get("matching_keywords"));
+            responseData.put("missing_keywords", aiResult.get("missing_keywords"));
+            responseData.put("pdfBase64", base64Pdf);
+
+            return ResponseEntity.ok(responseData);
 
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.internalServerError().body("Ocorreu um erro: " + e.getMessage());
+            return ResponseEntity.internalServerError().body(Map.of("error", "Ocorreu um erro: " + e.getMessage()));
         }
     }
 }

@@ -31,6 +31,11 @@ function App() {
   const [success, setSuccess] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
 
+  // Novos estados para o resultado da IA
+  const [score, setScore] = useState(null)
+  const [matchingKeywords, setMatchingKeywords] = useState([])
+  const [missingKeywords, setMissingKeywords] = useState([])
+
   const fileInputRef = useRef(null)
   const formRef = useRef(null)
 
@@ -70,35 +75,60 @@ function App() {
       return
     }
     setLoading(true); setError(''); setSuccess(false)
+    setScore(null); setMatchingKeywords([]); setMissingKeywords([]);
 
     const formData = new FormData()
     formData.append('arquivo', file)
     formData.append('vaga', vaga)
 
     try {
-      const response = await fetch('https://ats-backend-api-o8h8.onrender.com/api/curriculo/analisar', {
+      // 👇 DETEÇÃO INTELIGENTE DE AMBIENTE 👇
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      
+      const API_URL = isLocalhost 
+        ? 'http://localhost:8080/api/curriculo/analisar' // Backend na sua máquina
+        : 'https://ats-backend-api-o8h8.onrender.com/api/curriculo/analisar'; // Backend no Render
+
+      const response = await fetch(API_URL, {
         method: 'POST',
         body: formData,
       })
+      
       if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(errorText || 'Erro no servidor.')
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.error || 'Erro no servidor ao processar o currículo.')
       }
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'Curriculo_Otimizado.pdf'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
+      
+      // Lê o JSON retornado pelo backend
+      const data = await response.json()
+      
+      // Atualiza os estados para mostrar na tela
+      setScore(data.score)
+      setMatchingKeywords(data.matching_keywords || [])
+      setMissingKeywords(data.missing_keywords || [])
+
+      // Faz o download do PDF a partir do Base64
+      const linkSource = `data:application/pdf;base64,${data.pdfBase64}`
+      const downloadLink = document.createElement("a")
+      downloadLink.href = linkSource
+      downloadLink.download = 'Curriculo_Otimizado.pdf'
+      document.body.appendChild(downloadLink)
+      downloadLink.click()
+      downloadLink.remove()
+
       setSuccess(true)
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
     }
+  }
+
+  // Função para definir a cor da nota
+  const getScoreColor = (pts) => {
+    if (pts >= 85) return '#22c55e'; // Verde
+    if (pts >= 60) return '#eab308'; // Amarelo
+    return '#ef4444'; // Vermelho
   }
 
   return (
@@ -169,7 +199,7 @@ function App() {
         </div>
       </section>
 
-      {/* ── FORM ── */}
+      {/* ── FORM E RESULTADOS ── */}
       <section className="form-section" ref={formRef}>
         <div className="form-card">
           <div className="form-card-header">
@@ -249,17 +279,11 @@ function App() {
               <span className="char-count">{vaga.length} caracteres</span>
             </div>
 
-            {/* Feedback */}
+            {/* Feedback de Erro */}
             {error && (
               <div className="alert alert-error" role="alert">
                 <AlertCircle size={18} />
                 <span>{error}</span>
-              </div>
-            )}
-            {success && (
-              <div className="alert alert-success" role="status">
-                <CheckCircle2 size={18} />
-                <span>Currículo otimizado baixado com sucesso! 🎉</span>
               </div>
             )}
 
@@ -282,6 +306,47 @@ function App() {
               )}
             </button>
           </form>
+          
+          {/* RESULTADO DA IA - SÓ MOSTRA SE DER SUCESSO */}
+          {success && score !== null && (
+            <div style={{ marginTop: '24px', padding: '24px', backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155' }}>
+              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                <h3 style={{ color: '#f8fafc', fontSize: '1.25rem', marginBottom: '8px' }}>Resultado da Otimização 🎉</h3>
+                <p style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Seu currículo foi reescrito e baixado automaticamente!</p>
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '24px' }}>
+                <div style={{ fontSize: '3rem', fontWeight: 'bold', color: getScoreColor(score) }}>
+                  {score}%
+                </div>
+                <div style={{ color: '#cbd5e1', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  Compatibilidade ATS
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div style={{ backgroundColor: '#0f172a', padding: '16px', borderRadius: '8px' }}>
+                  <h4 style={{ color: '#22c55e', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                    <CheckCircle2 size={16} /> Pontos Fortes
+                  </h4>
+                  <ul style={{ color: '#cbd5e1', fontSize: '0.85rem', paddingLeft: '20px', margin: 0 }}>
+                    {matchingKeywords?.map((kw, i) => <li key={i} style={{ marginBottom: '4px' }}>{kw}</li>)}
+                  </ul>
+                </div>
+                
+                <div style={{ backgroundColor: '#0f172a', padding: '16px', borderRadius: '8px' }}>
+                  <h4 style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                    <AlertCircle size={16} /> Faltou no Currículo
+                  </h4>
+                  <ul style={{ color: '#cbd5e1', fontSize: '0.85rem', paddingLeft: '20px', margin: 0 }}>
+                    {missingKeywords?.map((kw, i) => <li key={i} style={{ marginBottom: '4px' }}>{kw}</li>)}
+                    {missingKeywords?.length === 0 && <li>Tudo perfeito!</li>}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       </section>
 
